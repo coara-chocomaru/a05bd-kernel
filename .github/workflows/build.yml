@@ -52,6 +52,31 @@ jobs:
         libxml2-utils xsltproc unzip python lib32z1 lib32stdc++6 libssl-dev \
         libswitch-perl swig maven libncurses5 xxd bc vim
 
+    - name: Clone Toolchain Repository
+      run: |
+          mkdir -p toolchain/gcc
+          git clone --branch ${{ env.TOOLCHAIN_BRANCH }} ${{ env.TOOLCHAIN_REPO }} toolchain/gcc/${{ env.TOOLCHAIN_NAME }}
+
+    - name: Download and Extract Clang
+      run: |
+          mkdir -p toolchain/clang
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-9.0.0_r6/clang-4691093.tar.gz -O clang.tar.gz
+          tar -xzf clang.tar.gz -C toolchain/clang
+          mv toolchain/clang/clang-4691093 toolchain/clang/clang-4691093  # Ensure the directory name matches
+          rm clang.tar.gz
+
+       
+      env:
+          KERNEL_SUBPATH: kernel/mediatek/mt8168/4.14
+          DEFCONFIG_NAME: a05bd_defconfig
+          TARGET_ARCH: arm64
+          TOOLCHAIN_REPO: https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+          TOOLCHAIN_BRANCH: llvm-r383902b
+          TOOLCHAIN_NAME: aarch64-linux-android-4.9
+          TOOLCHAIN_PREFIX: aarch64-linux-android-
+          KERNEL_IMAGES: arch/arm64/boot/Image:arch/arm64/boot/Image.gz:arch/arm64/boot/Image.gz-dtb
+          CLANG_COMPILER_PATH: ${{ github.workspace }}/toolchain/clang/clang-4691093
+   
     - name: Execute build script
       run: |
         chmod +x ./build_kernel.sh
