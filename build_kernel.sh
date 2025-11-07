@@ -36,6 +36,7 @@ function display_config {
     echo "TARGET ARCHITECTURE: ${TARGET_ARCH}"
     echo "TOOLCHAIN REPO: ${TOOLCHAIN_REPO}"
     echo "TOOLCHAIN PREFIX: ${TOOLCHAIN_PREFIX}"
+    echo "CLANG_COMPILER_PATH: ${CLANG_COMPILER_PATH}"
     echo "-------------------------------------------------------------------------"
     echo "Sleeping 3 seconds before continuing."
     sleep 3
@@ -71,15 +72,31 @@ function download_toolchain {
     fi
 }
 
-function download_toolchain2 {
-    echo "Cloning clang toolchain to $(pwd)/toolchain/clang"
-    git -c advice.detachedHead=false clone --single-branch -b android-9.0.0_r6 \
-        https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-        "$(pwd)/toolchain/clang" --depth=1
+function download_clang {
+    CLANG_CLONE_DIR="$(pwd)/toolchain/clang"
+    CLANG_TARGET_DIR="${CLANG_CLONE_DIR}/clang-4691093"
+    if [[ -d "${CLANG_TARGET_DIR}" ]]; then
+        echo "Clang-4691093 already exists at ${CLANG_TARGET_DIR}"
+        return 0
+    fi
+    mkdir -p "${CLANG_CLONE_DIR}"
+    pushd "${CLANG_CLONE_DIR}" > /dev/null
+    echo "Cloning clang prebuilts to ${CLANG_CLONE_DIR}"
+    git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 . --depth=1
     if [[ $? -ne 0 ]]; then
-        echo "ERROR: Could not clone clang toolchain."
+        echo "ERROR: Could not clone clang prebuilts."
+        popd > /dev/null
         exit 2
     fi
+    echo "Checking out clang-4691093"
+    git checkout clang-4691093
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: Could not checkout clang-4691093."
+        popd > /dev/null
+        exit 2
+    fi
+    popd > /dev/null
+    echo "Clang-4691093 cloned successfully to ${CLANG_TARGET_DIR}"
 }
 
 function apply_patch {
@@ -95,16 +112,15 @@ function apply_patch {
 function exec_build_kernel {
     CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
 
-    CLANG_DIR="$(pwd)/toolchain/clang"
-    if [[ ! -d "${CLANG_DIR}" ]]; then
-        echo "ERROR: Clang directory not found at ${CLANG_DIR}"
+    if [[ ! -d "${CLANG_COMPILER_PATH}" ]]; then
+        echo "ERROR: CLANG_COMPILER_PATH not found at ${CLANG_COMPILER_PATH}"
         exit 1
     fi
 
-    CLANG_BIN="${CLANG_DIR}/bin/clang"
+    CLANG_BIN="${CLANG_COMPILER_PATH}/bin/clang"
     if [[ ! -f "${CLANG_BIN}" ]]; then
         echo "ERROR: clang binary not found at ${CLANG_BIN}"
-        ls -la "${CLANG_DIR}/bin/" || true
+        ls -la "${CLANG_COMPILER_PATH}/bin/" 2>/dev/null || true
         exit 1
     fi
 
@@ -181,9 +197,7 @@ if [[ -z "$(ls -A "${TOOLCHAIN_DIR}")" ]]; then
     download_toolchain
 fi
 
-if [[ -z "$(ls -A "$(pwd)/toolchain/clang")" ]]; then
-    download_toolchain2
-fi
+download_clang
 
 apply_patch
 exec_build_kernel
