@@ -6,7 +6,7 @@
 #
 ################################################################################
 
-KERNEL_SUBPATH="kernel/mediatek/mt8168/4.14"
+KERNEL_SUBPATH="build/src/kernel/mediatek/mt8168/4.14"
 DEFCONFIG_NAME="a05bd_defconfig"
 TARGET_ARCH="arm64"
 TOOLCHAIN_REPO="https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9"
