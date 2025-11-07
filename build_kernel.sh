@@ -13,7 +13,7 @@
 ################################################################################
 
 # Kernel source subpath (adjust if your kernel source is located differently)
-KERNEL_SUBPATH="kernel/mediatek/mt8168/4.14"
+KERNEL_SUBPATH="/build/src/kernel/mediatek/mt8168/4.14"
 
 # Defconfig name
 DEFCONFIG_NAME="a05bd_defconfig"
