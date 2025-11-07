@@ -10,16 +10,37 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
+      
+    - name: deconf
+      run: |
+       apt-get update
+       apt-get install -y \
+       debconf-utils
+       
+    - name: Preseed tzdata for Tokyo
+      run: |
+       echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
+       echo "tzdata tzdata/Zones/Asia select Tokyo" | debconf-set-selections
+
+    - name: tzdata
+      run: |
+       apt-get install -y tzdata \
+            --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"
+      
 
     - name: Set up APT packages
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        apt-get update
+        apt-get install -y \
         git gnupg flex bison gperf build-essential zip curl \
         zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
         x11proto-core-dev libx11-dev lib32z-dev ccache libgl1-mesa-dev \
@@ -32,8 +53,7 @@ jobs:
         ./build_kernel.sh output
 
     - name: Upload build output
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: build-output
         path: ./output
-
