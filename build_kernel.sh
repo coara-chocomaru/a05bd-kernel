@@ -1,6 +1,5 @@
 #!/bin/bash
-set -e
-set -o pipefail
+set -euo pipefail
 
 if [ "$#" -eq 1 ]; then
     TARGET_DIR="$1"
@@ -22,8 +21,7 @@ PLATFORM_EXTRACT_DIR="${WORKSPACE_DIR}/src"
 WORKSPACE_OUT_DIR="${WORKSPACE_DIR}/out"
 OUTPUT_CFG="${WORKSPACE_OUT_DIR}/.config"
 
-for d in "${TOOLCHAIN_DIR}" "${PLATFORM_EXTRACT_DIR}" "${WORKSPACE_OUT_DIR}"
-do
+for d in "${TOOLCHAIN_DIR}" "${PLATFORM_EXTRACT_DIR}" "${WORKSPACE_OUT_DIR}"; do
     mkdir -p "${d}"
 done
 
@@ -85,9 +83,8 @@ download_toolchain() {
 }
 
 download_toolchain2() {
-    echo "Cloning toolchain https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 to toolchain/clang"
     git clone --single-branch -b android-9.0.0_r6 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$(pwd)/toolchain/clang" --depth=1 || {
-        echo "ERROR: Could not clone toolchain from https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86."
+        echo "ERROR: Could not clone toolchain clang."
         exit 2
     }
 }
@@ -107,14 +104,43 @@ apply_patch() {
     if [[ -f "${PATCH_FILE}" ]]; then
         echo "Applying patch to ${PLATFORM_EXTRACT_DIR}"
         pushd "${PLATFORM_EXTRACT_DIR}" > /dev/null
-        set +e
-        patch -p1 < "${PATCH_FILE}" 2>/dev/null
-        RET=$?
-        if [[ ${RET} -ne 0 ]]; then
-            patch -p0 < "${PATCH_FILE}" 2>/dev/null || echo "Patch apply failed or skipped"
+        patched=0
+        for p in 1 0; do
+            set +e
+            patch --dry-run -p${p} < "${PATCH_FILE}" >/dev/null 2>&1
+            RET=$?
+            set -e
+            if [[ ${RET} -eq 0 ]]; then
+                patch -p${p} < "${PATCH_FILE}"
+                patched=1
+                break
+            fi
+        done
+        if [[ ${patched} -eq 0 ]]; then
+            echo "Patch apply failed or skipped"
         fi
-        set -e
         popd > /dev/null
+    fi
+}
+
+locate_kernel_subpath() {
+    if [[ -n "${KERNEL_SUBPATH:-}" && -d "${PLATFORM_EXTRACT_DIR}/${KERNEL_SUBPATH}" ]]; then
+        return 0
+    fi
+    TARGET_ARCH="${TARGET_ARCH:-arm64}"
+    found=""
+    while IFS= read -r dir; do
+        if [[ -d "${dir}/arch/${TARGET_ARCH}" ]]; then
+            found="${dir}"
+            break
+        fi
+    done < <(find "${PLATFORM_EXTRACT_DIR}" -maxdepth 4 -type f -name "Makefile" -exec dirname {} \; 2>/dev/null)
+    if [[ -n "${found}" ]]; then
+        rel="${found#${PLATFORM_EXTRACT_DIR}/}"
+        KERNEL_SUBPATH="${rel:-.}"
+        echo "Auto-detected kernel subpath: ${KERNEL_SUBPATH}"
+    else
+        echo "Could not find kernel subpath under ${PLATFORM_EXTRACT_DIR}. Please check KERNEL_SUBPATH in config."
     fi
 }
 
@@ -123,36 +149,47 @@ exec_build_kernel() {
     if [[ -n "${TOOLCHAIN_PREFIX:-}" && -d "${TOOLCHAIN_DIR}/bin" && -x "${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}gcc" ]]; then
         CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
     elif [[ -d "${TOOLCHAIN_DIR}/bin" ]]; then
-        CCOMPILE="$(ls "${TOOLCHAIN_DIR}/bin" | head -n1 2>/dev/null || true)"
-        CCOMPILE="${TOOLCHAIN_DIR}/bin/${CCOMPILE}"
+        firstbin=$(ls "${TOOLCHAIN_DIR}/bin" | head -n1 2>/dev/null || true)
+        if [[ -n "${firstbin}" ]]; then
+            CCOMPILE="${TOOLCHAIN_DIR}/bin/${firstbin}"
+        fi
     fi
 
     if [[ -n "${CLANG_COMPILER_PATH:-}" && -x "${CLANG_COMPILER_PATH}/bin/clang" ]]; then
         CC="${CLANG_COMPILER_PATH}/bin/clang"
-    elif [[ -x "$(command -v clang 2>/dev/null)" ]]; then
+    elif command -v clang >/dev/null 2>&1; then
         CC="clang"
+    elif [[ -n "${CCOMPILE:-}" ]]; then
+        CC="${CCOMPILE}gcc"
     else
-        CC="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}gcc"
+        CC="clang"
+    fi
+
+    locate_kernel_subpath
+
+    if [[ -z "${KERNEL_SUBPATH:-}" ]]; then
+        echo "ERROR: KERNEL_SUBPATH not set and auto-detect failed."
+        exit 4
     fi
 
     MAKE_ARGS="-C ${KERNEL_SUBPATH} O=${WORKSPACE_OUT_DIR} ARCH=${TARGET_ARCH}"
     MAKE_ARGS1="-C ${KERNEL_SUBPATH} O=${WORKSPACE_OUT_DIR} ARCH=${TARGET_ARCH} CROSS_COMPILE=${CCOMPILE} CLANG_TRIPLE=aarch64-linux-gnu- CC=${CC}"
-    echo "MAKE_ARGS: ${MAKE_ARGS}"
-    echo "MAKE_ARGS1: ${MAKE_ARGS1}"
 
     pushd "${PLATFORM_EXTRACT_DIR}" > /dev/null
 
-    echo "Make defconfig: make ${MAKE_ARGS} ${DEFCONFIG_NAME}"
-    make ${MAKE_ARGS} ${DEFCONFIG_NAME} || true
+    echo "MAKE_ARGS: ${MAKE_ARGS}"
+    echo "MAKE_ARGS1: ${MAKE_ARGS1}"
 
-    echo ".config contents"
-    echo "---------------------------------------------------------------------"
+    echo "Make defconfig: make ${MAKE_ARGS} ${DEFCONFIG_NAME:-}"
+    set +e
+    make ${MAKE_ARGS} ${DEFCONFIG_NAME:-} || true
+    set -e
+
     if [[ -f "${OUTPUT_CFG}" ]]; then
         cat "${OUTPUT_CFG}"
     else
         echo "No output .config found at ${OUTPUT_CFG}"
     fi
-    echo "---------------------------------------------------------------------"
 
     echo "Running full make"
     make ${PARALLEL_EXECUTION} ${MAKE_ARGS1}
@@ -162,26 +199,27 @@ exec_build_kernel() {
 
 copy_to_output() {
     echo "Copying files to output"
+    if [[ ! -d "${WORKSPACE_OUT_DIR}" ]]; then
+        echo "No build output directory ${WORKSPACE_OUT_DIR} to copy from"
+        return 0
+    fi
     pushd "${WORKSPACE_OUT_DIR}" > /dev/null
     find "./arch/${TARGET_ARCH}/boot" -type f -print0 2>/dev/null | while IFS= read -r -d '' CPFILE; do
         REL="${CPFILE#./}"
         BASEDIR="$(dirname "${REL}")"
-        if [[ ! -d "${TARGET_DIR}/${BASEDIR}" ]]; then
-            mkdir -p "${TARGET_DIR}/${BASEDIR}"
-        fi
-        cp -v "${REL}" "${TARGET_DIR}/${REL}"
+        mkdir -p "${TARGET_DIR}/${BASEDIR}"
+        cp -v "${REL}" "${TARGET_DIR}/${REL}" || true
     done
     popd > /dev/null
 }
 
 validate_output() {
-    echo "Listing output files"
     IFS=":"
     for IMAGE in ${KERNEL_IMAGES:-}; do
-        if [ -z "${IMAGE}" ]; then
+        if [[ -z "${IMAGE}" ]]; then
             continue
         fi
-        if [ ! -f "${TARGET_DIR}/${IMAGE}" ]; then
+        if [[ ! -f "${TARGET_DIR}/${IMAGE}" ]]; then
             echo "ERROR: Missing kernel output image ${IMAGE}" >&2
             exit 1
         fi
@@ -195,13 +233,13 @@ setup_output_dir
 TARGET_DIR="$(cd "${TARGET_DIR}" && pwd)"
 display_config
 
-if [ -n "${TOOLCHAIN_NAME:-}" ]; then
+if [[ -n "${TOOLCHAIN_NAME:-}" ]]; then
     TOOLCHAIN_DIR="$(pwd)/toolchain/${TOOLCHAIN_NAME}"
 fi
-if [ -z "$(ls -A "${TOOLCHAIN_DIR}" 2>/dev/null || true)" ]; then
+if [[ -z "$(ls -A "${TOOLCHAIN_DIR}" 2>/dev/null || true)" ]]; then
     download_toolchain
 fi
-if [ -z "$(ls -A "$(pwd)/toolchain/clang" 2>/dev/null || true)" ]; then
+if [[ -z "$(ls -A "$(pwd)/toolchain/clang" 2>/dev/null || true)" ]]; then
     download_toolchain2
 fi
 
