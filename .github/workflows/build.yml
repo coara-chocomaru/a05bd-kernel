@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -66,21 +67,27 @@ jobs:
 
         cat > build_kernel.sh <<'EOF'
         #!/bin/bash
-        TARGET_DIR="${1}"
+        set -euo pipefail
+
+        TARGET_DIR="${1:-output}"
         SCRIPT_BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         CONFIG_FILE="${SCRIPT_BASE_DIR}/build_kernel_config.sh"
         PATCH_FILE="${SCRIPT_BASE_DIR}/platform_patch.txt"
-        mkdir build
+
+        mkdir -p build
         WORKSPACE_DIR="$(pwd)/build"
-        OUTPUT_CFG="${WORKSPACE_OUT_DIR}/.config"
+        WORKSPACE_OUT_DIR="${WORKSPACE_DIR}/out"
         TOOLCHAIN_DIR="${WORKSPACE_DIR}/toolchain"
         PLATFORM_EXTRACT_DIR="${WORKSPACE_DIR}/src"
-        WORKSPACE_OUT_DIR="${WORKSPACE_DIR}/out"
-        for d in "${TOOLCHAIN_DIR}" "${PLATFORM_EXTRACT_DIR}" "$WORKSPACE_OUT_DIR"
+        OUTPUT_CFG="${WORKSPACE_OUT_DIR}/.config"
+
+        for d in "${TOOLCHAIN_DIR}" "${PLATFORM_EXTRACT_DIR}" "${WORKSPACE_OUT_DIR}"
         do
             mkdir -p "${d}"
         done
+
         PARALLEL_EXECUTION="-j5"
+
         function usage { echo "Usage: ${BASH_SOURCE[0]} path_to_platform_tar output_folder" 1>&2; exit 1; }
         function validate_input_params {
             if [[ ! -f "${CONFIG_FILE}" ]]
@@ -91,7 +98,7 @@ jobs:
         }
         function display_config {
             echo "-------------------------------------------------------------------------"
-            echo "SOURCE TARBALL: ${PLATFORM_TARBALL}"
+            echo "SOURCE TARBALL: ${PLATFORM_TARBALL:-}"
             echo "TARGET DIRECTORY: ${TARGET_DIR}"
             echo "KERNEL SUBPATH: ${KERNEL_SUBPATH}"
             echo "DEFINITION CONFIG: ${DEFCONFIG_NAME}"
@@ -167,7 +174,11 @@ jobs:
             make ${MAKE_ARGS} ${DEFCONFIG_NAME}
             echo ".config contents"
             echo "---------------------------------------------------------------------"
-            cat "${OUTPUT_CFG}"
+            if [[ -f "${OUTPUT_CFG}" ]]; then
+                cat "${OUTPUT_CFG}"
+            else
+                echo ".config not found yet (this is normal if defconfig didn't create it)"
+            fi
             echo "---------------------------------------------------------------------"
             echo "Running full make"
             make ${PARALLEL_EXECUTION} ${MAKE_ARGS1}
@@ -182,7 +193,7 @@ jobs:
             pushd "${WORKSPACE_OUT_DIR}"
             find "./arch/"${TARGET_ARCH}"/boot" -type f | sed 's/^\.\///' | while read CPFILE
             do
-                local BASEDIR="$(dirname "${CPFILE}")"
+                BASEDIR="$(dirname "${CPFILE}")"
                 if [[ ! -d "${TARGET_DIR}/${BASEDIR}" ]]
                 then
                     mkdir -p "${TARGET_DIR}/${BASEDIR}"
