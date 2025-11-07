@@ -72,10 +72,12 @@ function download_toolchain {
 }
 
 function download_toolchain2 {
-    echo "Cloning toolchain https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 to toolchain/clang"
-    git -c advice.detachedHead=false clone --single-branch -b android-9.0.0_r6 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$(pwd)/toolchain/clang" --depth=1
+    echo "Cloning clang toolchain to $(pwd)/toolchain/clang"
+    git -c advice.detachedHead=false clone --single-branch -b android-9.0.0_r6 \
+        https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+        "$(pwd)/toolchain/clang" --depth=1
     if [[ $? -ne 0 ]]; then
-        echo "ERROR: Could not clone toolchain from https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86."
+        echo "ERROR: Could not clone clang toolchain."
         exit 2
     fi
 }
@@ -84,7 +86,7 @@ function apply_patch {
     if [[ -f "${PATCH_FILE}" ]]
     then
         echo "Applying patch to ${PLATFORM_EXTRACT_DIR}"
-        pushd ${PLATFORM_EXTRACT_DIR} > /dev/null
+        pushd "${PLATFORM_EXTRACT_DIR}" > /dev/null
         patch -p1 < "${PATCH_FILE}"
         popd > /dev/null
     fi
@@ -92,7 +94,12 @@ function apply_patch {
 
 function exec_build_kernel {
     CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
-    CC="$(pwd)/toolchain/clang/bin/clang"
+    CLANG_DIR="$(pwd)/toolchain/clang"
+    if [[ ! -d "${CLANG_DIR}" ]]; then
+        echo "ERROR: Clang directory not found at ${CLANG_DIR}"
+        exit 1
+    fi
+    CC="${CLANG_DIR}/bin/clang"
 
     MAKE_ARGS=""
     [[ -n "${KERNEL_SUBPATH}" ]] && MAKE_ARGS="-C ${KERNEL_SUBPATH}"
