@@ -58,7 +58,7 @@ jobs:
       run: |
         cd /__w/a05bd-kernel/a05bd-kernel
         mkdir -p toolchain/clang/clang-4691093
-        curl -L https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/llvm-r383902b.tar.gz | tar xz -C toolchain/clang/clang-4691093
+        curl -L https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-9.0.0_r6/clang-4691093.tar.gz | tar xz -C toolchain/clang/clang-4691093
 
     - name: Execute build script
       run: |
