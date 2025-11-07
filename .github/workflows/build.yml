@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ubuntu:20.04
-
+      options: --user root
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
