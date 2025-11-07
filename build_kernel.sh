@@ -1,246 +1,134 @@
 #!/bin/bash
+
 ################################################################################
 #
-#  build_kernel.sh
+#  build_kernel_config.sh
 #
 #  Copyright (c) 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
-################################################################################
-
-################################################################################
-#
-#  I N P U T
-#
-################################################################################
-# Folder for platform tarball.
-#PLATFORM_TARBALL="${1}"
-
-# Target directory for output artifacts.
-TARGET_DIR="${1}"
-
-################################################################################
-#
-#  V A R I A B L E S
+#  Modified for building with a05bd_defconfig on Ubuntu 20.04 container.
+#  This script sets up the environment, downloads necessary toolchains,
+#  configures the kernel with the specified defconfig, and builds it.
 #
 ################################################################################
 
-# Retrieve the directory where the script is currently held
-SCRIPT_BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Kernel source subpath (adjust if your kernel source is located differently)
+KERNEL_SUBPATH="kernel/mediatek/mt8168/4.14"
 
-# Configuration file for the build.
-CONFIG_FILE="${SCRIPT_BASE_DIR}/build_kernel_config.sh"
-PATCH_FILE="${SCRIPT_BASE_DIR}/platform_patch.txt"
+# Defconfig name
+DEFCONFIG_NAME="a05bd_defconfig"
 
-# Workspace directory & relevant temp folders.
-mkdir build
-WORKSPACE_DIR="$(pwd)/build"
-OUTPUT_CFG="${WORKSPACE_OUT_DIR}/.config"
-TOOLCHAIN_DIR="${WORKSPACE_DIR}/toolchain"
-PLATFORM_EXTRACT_DIR="${WORKSPACE_DIR}/src"
-WORKSPACE_OUT_DIR="${WORKSPACE_DIR}/out"
+# Target architecture
+TARGET_ARCH="arm64"
 
-for d in "${TOOLCHAIN_DIR}" "${PLATFORM_EXTRACT_DIR}" "$WORKSPACE_OUT_DIR"
-do
-    mkdir -p "${d}"
-done
+# Toolchain repository for GCC (AOSP prebuilts)
+TOOLCHAIN_REPO="https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9"
 
-# Remove workspace directory upon completion.
-#trap "rm -rf $WORKSPACE_DIR" EXIT
+# Toolchain branch
+TOOLCHAIN_BRANCH="llvm-r383902b"
 
-PARALLEL_EXECUTION="-j5"
+# Toolchain name
+TOOLCHAIN_NAME="aarch64-linux-android-4.9"
 
-function usage {
-    echo "Usage: ${BASH_SOURCE[0]} path_to_platform_tar output_folder" 1>&2
-    exit 1
-}
+# Toolchain prefix
+TOOLCHAIN_PREFIX="aarch64-linux-android-"
 
-function validate_input_params {
-    #if [[ ! -f "${PLATFORM_TARBALL}" ]]
-    #then
-    #    echo "ERROR: Platform tarball not found."
-    #    usage
-    #fi
+# Expected image files are separated with ":"
+KERNEL_IMAGES="arch/arm64/boot/Image:arch/arm64/boot/Image.gz:arch/arm64/boot/Image.gz-dtb"
 
-    if [[ ! -f "${CONFIG_FILE}" ]]
-    then
-        echo "ERROR: Could not find config file ${CONFIG_FILE}. Please check" \
-             "that you have extracted the build script properly and try again."
-        usage
-    fi
-}
+################################################################################
+# NOTE: You must fill in the following with the path to a copy of Clang compiler
+# Recommended version 6.0.2 (or 4691093).
+# Adjust this path if Clang is installed elsewhere in your container.
+################################################################################
+CLANG_COMPILER_PATH="$(pwd)/toolchain/clang/clang-4691093"
 
-function display_config {
-    echo "-------------------------------------------------------------------------"
-    echo "SOURCE TARBALL: ${PLATFORM_TARBALL}"
-    echo "TARGET DIRECTORY: ${TARGET_DIR}"
-    echo "KERNEL SUBPATH: ${KERNEL_SUBPATH}"
-    echo "DEFINITION CONFIG: ${DEFCONFIG_NAME}"
-    echo "TARGET ARCHITECTURE: ${TARGET_ARCH}"
-    echo "TOOLCHAIN REPO: ${TOOLCHAIN_REPO}"
-    echo "TOOLCHAIN PREFIX: ${TOOLCHAIN_PREFIX}"
-    echo "-------------------------------------------------------------------------"
-    echo "Sleeping 3 seconds before continuing."
-    sleep 3
-}
+# Additional variables
+KERNEL_SRC_DIR="$(pwd)/${KERNEL_SUBPATH}"
+TOOLCHAIN_DIR="$(pwd)/toolchain/${TOOLCHAIN_NAME}"
+BUILD_DIR="$(pwd)/build"
+JOBS="$(nproc)"  # Number of parallel jobs (use all available cores)
 
-function setup_output_dir {
-
-    if [[ -d "${TARGET_DIR}" ]]
-    then
-        FILECOUNT=$(find "${TARGET_DIR}" -type f | wc -l)
-        if [[ ${FILECOUNT} -gt 0 ]]
-        then
-            echo "ERROR: Destination folder is not empty. Refusing to build" \
-                 "to a non-clean target"
-            exit 3
-        fi
-    else
-        echo "Making target directory ${TARGET_DIR}"
-        mkdir -p "${TARGET_DIR}"
-
-        if [[ $? -ne 0 ]]
-        then
-            echo "ERROR: Could not make target directory ${TARGET_DIR}"
+# Function to download and set up toolchain if not present
+setup_toolchain() {
+    if [ ! -d "${TOOLCHAIN_DIR}" ]; then
+        echo "Downloading toolchain from ${TOOLCHAIN_REPO} branch ${TOOLCHAIN_BRANCH}..."
+        mkdir -p "$(dirname ${TOOLCHAIN_DIR})"
+        git clone --branch "${TOOLCHAIN_BRANCH}" "${TOOLCHAIN_REPO}" "${TOOLCHAIN_DIR}"
+        if [ $? -ne 0 ]; then
+            echo "Failed to download toolchain. Exiting."
             exit 1
         fi
+    else
+        echo "Toolchain already exists at ${TOOLCHAIN_DIR}."
     fi
 }
 
-function download_toolchain {
-    echo "Cloning toolchain ${TOOLCHAIN_REPO} to ${TOOLCHAIN_DIR}"
-    git clone --single-branch -b "${TOOLCHAIN_BRANCH}" "${TOOLCHAIN_REPO}" "${TOOLCHAIN_DIR}" --depth=1
-    if [[ $? -ne 0 ]]
-    then
-        echo "ERROR: Could not clone toolchain from ${TOOLCHAIN_REPO}."
-        exit 2
+# Function to check if Clang is available
+check_clang() {
+    if [ ! -d "${CLANG_COMPILER_PATH}" ]; then
+        echo "Clang compiler not found at ${CLANG_COMPILER_PATH}."
+        echo "Please download and extract Clang (recommended version 4691093) to this path."
+        echo "You can obtain it from AOSP or other sources."
+        exit 1
     fi
-
+    echo "Clang found at ${CLANG_COMPILER_PATH}."
 }
 
-function download_toolchain2 {
-    echo "Cloning toolchain https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 to toolchain/clang"
-    git clone --single-branch -b android-9.0.0_r6 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$(pwd)/toolchain/clang" --depth=1
-    if [[ $? -ne 0 ]]; then
-        echo "ERROR: Could not clone toolchain from https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86."
-        exit 2
-    fi
+# Main build function
+build_kernel() {
+    # Change to kernel source directory
+    cd "${KERNEL_SRC_DIR}" || { echo "Kernel source directory not found: ${KERNEL_SRC_DIR}"; exit 1; }
 
-}
+    # Create build directory if not exists
+    mkdir -p "${BUILD_DIR}"
 
-function extract_tarball {
-    echo "Extracting tarball to ${PLATFORM_EXTRACT_DIR}"
-    tar xf "${PLATFORM_TARBALL}" -C ${PLATFORM_EXTRACT_DIR}
-}
+    # Set environment variables
+    export ARCH="${TARGET_ARCH}"
+    export CROSS_COMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
+    export PATH="${CLANG_COMPILER_PATH}/bin:${TOOLCHAIN_DIR}/bin:${PATH}"
+    export CLANG_TRIPLE=aarch64-linux-gnu-
+    export CC="${CLANG_COMPILER_PATH}/bin/clang"
+    export LD="${CLANG_COMPILER_PATH}/bin/ld.lld"  # Use LLD if available for linking
 
-function apply_patch {
-    if [[ -f "${PATCH_FILE}" ]]
-    then
-        echo "Applying patch to ${PLATFORM_EXTRACT_DIR}"
-        pushd ${PLATFORM_EXTRACT_DIR}
-        patch -p1 < ${PATCH_FILE}
-        popd
-    fi
-}
+    # Clean previous build (optional, comment out if not needed)
+    make O="${BUILD_DIR}" clean
 
-function exec_build_kernel {
-    CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
-    CC="${CLANG_COMPILER_PATH}/bin/clang"
-
-    if [[ -n "${KERNEL_SUBPATH}" ]]
-    then
-        MAKE_ARGS="-C ${KERNEL_SUBPATH}"
-    fi
-
-    MAKE_ARGS="-C ${KERNEL_SUBPATH} O=${WORKSPACE_OUT_DIR} ARCH=${TARGET_ARCH}"
-    MAKE_ARGS1="-C ${KERNEL_SUBPATH} O=${WORKSPACE_OUT_DIR} ARCH=${TARGET_ARCH} CROSS_COMPILE=${CCOMPILE} CLANG_TRIPLE=aarch64-linux-gnu- CC=${CC}"
-    echo "MAKE_ARGS: ${MAKE_ARGS}"
-    echo "MAKE_ARGS1: ${MAKE_ARGS1}"
-
-    # Move into the build base folder.
-    pushd "${PLATFORM_EXTRACT_DIR}"
-
-    # Step 1: defconfig
-    echo "Make defconfig: make ${MAKE_ARGS} ${DEFCONFIG_NAME}"
-    make ${MAKE_ARGS} ${DEFCONFIG_NAME}
-
-    # Step 2: output config, for reference
-    echo ".config contents"
-    echo "---------------------------------------------------------------------"
-    cat "${OUTPUT_CFG}"
-    echo "---------------------------------------------------------------------"
-
-    # Step 3: full make
-    echo "Running full make"
-    make ${PARALLEL_EXECUTION} ${MAKE_ARGS1}
-
-    if [[ $? != 0 ]]; then
-        echo "ERROR: Failed to build kernel" >&2
+    # Configure with defconfig
+    echo "Configuring kernel with ${DEFCONFIG_NAME}..."
+    make O="${BUILD_DIR}" "${DEFCONFIG_NAME}"
+    if [ $? -ne 0 ]; then
+        echo "Failed to configure kernel. Exiting."
         exit 1
     fi
 
-    popd
-}
+    # Build the kernel
+    echo "Building kernel with ${JOBS} jobs..."
+    make O="${BUILD_DIR}" -j"${JOBS}"
+    if [ $? -ne 0 ]; then
+        echo "Kernel build failed. Exiting."
+        exit 1
+    fi
 
-function copy_to_output {
-    echo "Copying files to output"
-
-    pushd "${WORKSPACE_OUT_DIR}"
-    find "./arch/"${TARGET_ARCH}"/boot" -type f | sed 's/^\.\///' | while read CPFILE
-    do
-        local BASEDIR="$(dirname "${CPFILE}")"
-        if [[ ! -d "${TARGET_DIR}/${BASEDIR}" ]]
-        then
-            mkdir -p "${TARGET_DIR}/${BASEDIR}"
+    # Check for expected images
+    for image in $(echo "${KERNEL_IMAGES}" | tr ':' ' '); do
+        if [ -f "${BUILD_DIR}/${image}" ]; then
+            echo "Kernel image built: ${BUILD_DIR}/${image}"
+        else
+            echo "Warning: Expected image not found: ${image}"
         fi
-        cp -v "${CPFILE}" "${TARGET_DIR}/${CPFILE}"
-    done
-    popd
-}
-
-function validate_output {
-    echo "Listing output files"
-    local IFS=":"
-    for IMAGE in ${KERNEL_IMAGES};do
-        if [ ! -f ${TARGET_DIR}/${IMAGE} ]; then
-            echo "ERROR: Missing kernel output image ${IMAGE}" >&2
-            exit 1
-        fi
-        ls -l ${TARGET_DIR}/${IMAGE}
     done
 }
 
-################################################################################
-#
-#  M A I N
-#
-################################################################################
+# Main execution
+echo "Starting kernel build script..."
 
-# Phase 1: Set up execution
-validate_input_params
-source "${CONFIG_FILE}"
-setup_output_dir
-TARGET_DIR="$(cd "${TARGET_DIR}" && pwd)"
-display_config
+# Setup dependencies (assuming running in Ubuntu 20.04 container)
+# Install required packages if not already installed
+apt-get update && apt-get install -y git build-essential bc bison flex libssl-dev python3
 
-# Phase 2: Set up environment
-if [ -n "${TOOLCHAIN_NAME}" ]; then
-    TOOLCHAIN_DIR="$(pwd)/toolchain/${TOOLCHAIN_NAME}"
-fi
-if [ -z "$(ls -A ${TOOLCHAIN_DIR})" ]; then
-    download_toolchain
-fi
-if [ -z "$(ls -A $(pwd)/toolchain/clang)" ]; then
-    download_toolchain2
-fi
+setup_toolchain
+check_clang
+build_kernel
 
-#extract_tarball
-apply_patch
-
-# Phase 3: build
-exec_build_kernel
-
-# Phase 4: move to output
-copy_to_output
-
-# Phase 5: verify output
-validate_output
+echo "Kernel build completed."
