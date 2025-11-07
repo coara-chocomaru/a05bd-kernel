@@ -17,6 +17,11 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Enable 32-bit architecture
+      run: |
+       dpkg --add-architecture i386
+       apt-get update
       
     - name: deconf
       run: |
