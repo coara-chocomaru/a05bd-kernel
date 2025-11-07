@@ -94,17 +94,24 @@ function apply_patch {
 
 function exec_build_kernel {
     CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
+
     CLANG_DIR="$(pwd)/toolchain/clang"
     if [[ ! -d "${CLANG_DIR}" ]]; then
         echo "ERROR: Clang directory not found at ${CLANG_DIR}"
         exit 1
     fi
-    CC="${CLANG_DIR}/bin/clang"
+
+    CLANG_BIN="${CLANG_DIR}/bin/clang"
+    if [[ ! -f "${CLANG_BIN}" ]]; then
+        echo "ERROR: clang binary not found at ${CLANG_BIN}"
+        ls -la "${CLANG_DIR}/bin/" || true
+        exit 1
+    fi
 
     MAKE_ARGS=""
     [[ -n "${KERNEL_SUBPATH}" ]] && MAKE_ARGS="-C ${KERNEL_SUBPATH}"
     MAKE_ARGS="${MAKE_ARGS} O=${WORKSPACE_OUT_DIR} ARCH=${TARGET_ARCH}"
-    MAKE_ARGS1="${MAKE_ARGS} CROSS_COMPILE=${CCOMPILE} CLANG_TRIPLE=aarch64-linux-gnu- CC=${CC}"
+    MAKE_ARGS1="${MAKE_ARGS} CROSS_COMPILE=${CCOMPILE} CLANG_TRIPLE=aarch64-linux-gnu- CC=${CLANG_BIN}"
 
     echo "MAKE_ARGS: ${MAKE_ARGS}"
     echo "MAKE_ARGS1: ${MAKE_ARGS1}"
