@@ -1,3 +1,4 @@
+```bash
 #!/bin/bash
 ################################################################################
 #
@@ -142,6 +143,51 @@ function apply_patch {
     fi
 }
 
+# ===========================
+# Sanitize source tree: remove any references to MODVERSIONS and Module.symvers
+# This is destructive on the extracted source tree and will remove any line
+# containing the token "MODVERSIONS" (case-insensitive) and any explicit
+# CONFIG_MODVERSIONS=... lines, then delete Module.symvers files.
+# ===========================
+function sanitize_sources {
+    echo "Sanitizing extracted sources: removing MODVERSIONS references and Module.symvers..."
+
+    if [[ ! -d "${PLATFORM_EXTRACT_DIR}" ]]; then
+        echo "No extracted platform source directory (${PLATFORM_EXTRACT_DIR}) found; skipping sanitize."
+        return 0
+    fi
+
+    pushd "${PLATFORM_EXTRACT_DIR}" >/dev/null
+
+    # Find files containing MODVERSIONS (case-insensitive). Process only regular files.
+    mapfile -t files_with_modvers < <(grep -RIl --exclude-dir=".git" --exclude-dir=".repo" --exclude-dir="output" "MODVERSIONS" . || true)
+
+    if [[ ${#files_with_modvers[@]} -gt 0 ]]; then
+        for f in "${files_with_modvers[@]}"; do
+            # Only operate on regular files
+            if [[ -f "$f" ]]; then
+                # Remove any line containing the token MODVERSIONS (case-insensitive)
+                sed -i -E '/MODVERSIONS/Id' "$f" || true
+                # Remove any explicit CONFIG_MODVERSIONS=... lines (redundant but safe)
+                sed -i -E '/^CONFIG_MODVERSIONS[[:space:]]*=/Id' "$f" || true
+            fi
+        done
+    fi
+
+    # Also do a sweep to remove CONFIG_MODVERSIONS= lines in any file that may not have been caught
+    # (operate on all text files under tree)
+    # Use find to avoid binary files
+    find . -type f -name "*" -print0 \
+      | xargs -0 --no-run-if-empty -n1 bash -c 'file="$0"; if file "$file" | grep -qi text; then sed -i -E "/^CONFIG_MODVERSIONS[[:space:]]*=/Id" "$file" || true; fi' --
+
+    # Delete any Module.symvers files anywhere under source tree
+    find . -type f -name "Module.symvers" -exec rm -f {} +
+
+    popd >/dev/null
+
+    echo "Sanitization complete."
+}
+
 function exec_build_kernel {
     CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
     CC="${CLANG_COMPILER_PATH}/bin/clang"
@@ -236,6 +282,9 @@ fi
 #extract_tarball
 apply_patch
 
+# *** NEW: sanitize extracted source tree BEFORE building (destructive) ***
+sanitize_sources
+
 # Phase 3: build
 exec_build_kernel
 
@@ -244,3 +293,4 @@ copy_to_output
 
 # Phase 5: verify output
 validate_output
+```
