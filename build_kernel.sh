@@ -142,18 +142,6 @@ function apply_patch {
     fi
 }
 
-function remove_modversions {
-    if [[ -d "${PLATFORM_EXTRACT_DIR}" ]]; then
-        files=$(grep -IlR --exclude-dir=.git "MODVERSIONS" "${PLATFORM_EXTRACT_DIR}" 2>/dev/null || true)
-        if [[ -n "${files}" ]]; then
-            while IFS= read -r f; do
-                sed -i '/MODVERSIONS/d' "${f}" 2>/dev/null || true
-            done <<< "${files}"
-        fi
-        find "${PLATFORM_EXTRACT_DIR}" -type f -name 'Module.symvers' -exec rm -f {} \;
-    fi
-}
-
 function exec_build_kernel {
     CCOMPILE="${TOOLCHAIN_DIR}/bin/${TOOLCHAIN_PREFIX}"
     CC="${CLANG_COMPILER_PATH}/bin/clang"
@@ -247,7 +235,6 @@ fi
 
 #extract_tarball
 apply_patch
-remove_modversions
 
 # Phase 3: build
 exec_build_kernel
