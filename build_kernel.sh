@@ -34,7 +34,7 @@ PATCH_FILE="${SCRIPT_BASE_DIR}/platform_patch.txt"
 # Workspace directory & relevant temp folders.
 mkdir build
 WORKSPACE_DIR="$(pwd)/build"
-OUTPUT_CFG="${WORKSPACE_OUT_DIR}/.config"
+OUTPUT_CFG="${WORKSPACE_DIR}/.config"
 TOOLCHAIN_DIR="${WORKSPACE_DIR}/toolchain"
 PLATFORM_EXTRACT_DIR="${WORKSPACE_DIR}/src"
 WORKSPACE_OUT_DIR="${WORKSPACE_DIR}/out"
