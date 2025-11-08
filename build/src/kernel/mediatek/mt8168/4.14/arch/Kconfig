@@ -483,9 +483,9 @@ config GCC_PLUGIN_STRUCTLEAK_VERBOSE
 	  by the plugin, this can produce false positive warnings.
 
 config GCC_PLUGIN_RANDSTRUCT
-	bool "Randomize layout of sensitive kernel structures"
-	depends on GCC_PLUGINS
-	select MODVERSIONS if MODULES
+	#bool "Randomize layout of sensitive kernel structures"
+	#depends on GCC_PLUGINS
+	#select MODVERSIONS if MODULES
 	help
 	  If you say Y here, the layouts of structures that are entirely
 	  function pointers (and have not been manually annotated with
