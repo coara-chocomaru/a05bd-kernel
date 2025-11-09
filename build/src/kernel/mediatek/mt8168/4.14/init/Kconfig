@@ -1876,9 +1876,9 @@ config MODULE_FORCE_UNLOAD
 	  rmmod).  This is mainly for kernel developers and desperate users.
 	  If unsure, say N.
 
-config MODVERSIONS
-	bool "Module versioning support"
-	help
+#config #MODVERSIONS
+	#bool "Module versioning support"
+	#help
 	  Usually, you have to use modules compiled with your kernel.
 	  Saying Y here makes it sometimes possible to use modules
 	  compiled for different kernels, by adding enough information
